@@ -1,4 +1,6 @@
 name: wave-776-apply
+permissions:
+  contents: write
 on:
   workflow_dispatch:
     inputs:
