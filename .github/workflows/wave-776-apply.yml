@@ -1,0 +1,44 @@
+name: wave-776-apply
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply patch and regenerate clients
+        env:
+          PATCH_URL: https://paste.rs/rGwzA
+          PATCH_SHA256: c713a5e4e229ade1c656c0bffda7be69bef1a5c399e96fc25c147069399a64f4
+          BRANCH: fix/776-list-limits-stats
+        run: |
+          set -euo pipefail
+          git config user.name jdegen808
+          git config user.email jdegen808@users.noreply.github.com
+          curl -fsSL "$PATCH_URL" -o /tmp/776.patch
+          echo "$PATCH_SHA256  /tmp/776.patch" | sha256sum -c -
+          git fetch origin main
+          git checkout -B "$BRANCH" origin/main
+          git rm -q .github/workflows/wave-776-apply.yml
+          git apply --whitespace=nowarn /tmp/776.patch
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1
+          ( cd packages/go-client && "$(go env GOPATH)/bin/oapi-codegen" --config oapi-codegen.yaml ../../docs/openapi.yaml )
+          bash packages/python-sdk/scripts/generate_client.sh
+          git add -A -- docs/openapi.yaml apps/api packages/go-client/internal packages/python-sdk/src/sorolens/_generated packages/python-sdk/tests/fixtures
+          git commit -m "fix(api): bound list pages, validate query params and cache global stats (#776)"
+          git push origin "$BRANCH"
+          git show --stat --oneline HEAD
