@@ -13,24 +13,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Rebase the #776 branch onto upstream main as one commit
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply patch on current upstream main and regenerate clients
         env:
+          PATCH_URL: https://paste.rs/rGwzA
+          PATCH_SHA256: c713a5e4e229ade1c656c0bffda7be69bef1a5c399e96fc25c147069399a64f4
           BRANCH: fix/776-list-limits-stats
         run: |
           set -euo pipefail
           git config user.name jdegen808
           git config user.email jdegen808@users.noreply.github.com
-          git fetch origin "$BRANCH"
-          tip="$(git rev-parse FETCH_HEAD)"
+          curl -fsSL "$PATCH_URL" -o /tmp/776.patch
+          echo "$PATCH_SHA256  /tmp/776.patch" | sha256sum -c -
           git fetch --no-tags https://github.com/sorolens/sorolens main:refs/remotes/upstream/main
           upstream="$(git rev-parse refs/remotes/upstream/main)"
+          echo "upstream main: $upstream"
           git checkout -B clean "$upstream"
-          git checkout "$tip" -- .
+          git apply --whitespace=nowarn /tmp/776.patch
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1
+          ( cd packages/go-client && "$(go env GOPATH)/bin/oapi-codegen" --config oapi-codegen.yaml ../../docs/openapi.yaml )
+          bash packages/python-sdk/scripts/generate_client.sh
+          git add -A -- docs/openapi.yaml apps/api packages/go-client/internal packages/python-sdk/src/sorolens/_generated packages/python-sdk/tests/fixtures
           git commit -m "fix(api): bound list pages, validate query params and cache global stats (#776)"
-          if [ "$(git rev-parse HEAD^{tree})" != "$(git rev-parse "$tip^{tree}")" ]; then
-            echo "tree mismatch" >&2
-            exit 1
-          fi
           git push --force origin clean:refs/heads/"$BRANCH"
           git log --oneline -2
           git show --stat --oneline HEAD
